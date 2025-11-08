@@ -1,0 +1,34 @@
+# Node.js
+node_modules/
+npm-debug.log*
+yarn.lock
+pnpm-lock.yaml
+
+# Vite build output
+dist/
+
+# PlatformIO (ESP32)
+.pio/
+.libdeps/
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# Env & secrets
+.env
+.env.* 
+
+# Logs
+*.log
+logs/
+debug.log
+
+# OS junk
+Thumbs.db
+.DS_Store
+
+
+
+# Optional: build artifacts
+build/
