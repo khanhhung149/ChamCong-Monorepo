@@ -26,9 +26,9 @@ using eloq::face_t;
 using eloq::face::detection;
 using eloq::face::recognition;
 
-const char* WIFI_SSID = "Cafe Goc";         // <<<< SỬA LẠI
-const char* WIFI_PASSWORD = "20252026"; // <<<< SỬA LẠI
-String API_URL = "http://192.168.1.183:5000/api/log-attendance";
+const char* WIFI_SSID = "KHANH HUNG VNPT";         // <<<< SỬA LẠI
+const char* WIFI_PASSWORD = "0978395904"; // <<<< SỬA LẠI
+String API_URL = "http://192.168.88.119:5000/api/log-attendance";
 
 const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 3600 * 7; // Múi giờ Việt Nam (GMT+7)
@@ -50,6 +50,11 @@ typedef struct {
 
 static QueueHandle_t uploadQueue = NULL;
 SemaphoreHandle_t camAIMutex = NULL;
+
+static TaskHandle_t g_senderTaskHandle = NULL;
+static TaskHandle_t g_enrollTaskHandle = NULL;
+static TaskHandle_t g_recogTaskHandle = NULL;
+static TaskHandle_t g_wsTaskHandle = NULL; // Thêm cho wsTask
 // enroll queue
 typedef struct {
     char name[48];
@@ -316,8 +321,8 @@ void setup() {
     // you can set a custom confidence score
     // to consider a face valid
     // (in range 0 - 1, default is 0.5)
-    detection.confidence(0.85);
-    recognition.confidence(0.98);
+    detection.confidence(0.80);
+    recognition.confidence(0.97);
 
 
     tft.drawString("Khoi tao Camera...", 5, 60, 2);  
@@ -347,12 +352,6 @@ void setup() {
     Serial.println("Camera OK");
     Serial.println("Face recognizer OK");
 
-    // <<< THÊM VÀO ĐÂY: BÁO CÁO BỘ NHỚ >>>
-    Serial.println("--- TINH TRANG BO NHO (SAU KHI KHOI TAO) ---");
-    Serial.printf("Tong HEAP: %u | Con trong: %u\n", ESP.getHeapSize(), ESP.getFreeHeap());
-    // PSRAM là quan trọng nhất cho camera
-    Serial.printf("Tong PSRAM: %u | Con trong: %u\n", ESP.getPsramSize(), ESP.getFreePsram());
-    Serial.println("---------------------------------------------");
 
     //  if (prompt("Do you want to delete all existing faces? [yes|no]").startsWith("y")) {
     //     Serial.println("Deleting all existing faces...");
@@ -379,7 +378,7 @@ if (camAIMutex == NULL) {
     // pin senderTask to core 0 so background network/filesystem work
     // doesn't compete with the main loop/recognition (which runs on the
     // Arduino loop task core). This reduces concurrent pressure on PSRAM.
-    xTaskCreatePinnedToCore(senderTask, "senderTask", 10 * 1024, NULL, 1, NULL, 0);
+    xTaskCreatePinnedToCore(senderTask, "senderTask", 10 * 1024, NULL, 1, &g_senderTaskHandle, 0);
         Serial.println("senderTask started");
     }
 
@@ -389,7 +388,7 @@ if (camAIMutex == NULL) {
         Serial.println("Loi: Khong the tao enrollQueue");
     } else {
     // pin enrollTask to core 0 and give it higher priority than recognition to preempt quickly
-    xTaskCreatePinnedToCore(enrollTask, "enrollTask", 36 * 1024, NULL, 2, NULL, 1);
+    xTaskCreatePinnedToCore(enrollTask, "enrollTask", 36 * 1024, NULL, 2, &g_enrollTaskHandle, 1);
         Serial.println("enrollTask started");
     }
 
@@ -432,7 +431,7 @@ if (wsSendQueue == NULL) {
     10 * 1024,         // Kích thước stack (6KB)
     NULL,             // Tham số
     2,                // Ưu tiên
-    NULL,             // Handle
+    &g_wsTaskHandle,             // Handle
     0                 // Chạy trên Core 0
 );
 Serial.println("wsTask started");
@@ -445,7 +444,7 @@ Serial.println("wsTask started");
         28 * 1024, // larger stack for model inference
         NULL,
         1,
-        NULL,
+        &g_recogTaskHandle,
         1 // pin to core 1 (Arduino loop core)
     );
     Serial.println("recognitionTask started");
@@ -610,6 +609,7 @@ static bool capture_best_and_enqueue(const String &employeeId, int attempts = 5,
     if (!payload) {
         Serial.println("capture_best: malloc failed for payload");
         if (best_must_free && best_jpg) free(best_jpg);
+        xSemaphoreGive(camAIMutex);
         return false;
     }
     memcpy(payload, best_jpg, best_jpg_len);
@@ -625,6 +625,7 @@ static bool capture_best_and_enqueue(const String &employeeId, int attempts = 5,
         Serial.println("capture_best: uploadQueue not created");
         free(payload);
         if (best_must_free && best_jpg) free(best_jpg);
+        xSemaphoreGive(camAIMutex);
         return false;
     }
 
@@ -632,6 +633,7 @@ static bool capture_best_and_enqueue(const String &employeeId, int attempts = 5,
         Serial.println("capture_best: upload queue full");
         free(payload);
         if (best_must_free && best_jpg) free(best_jpg);
+        xSemaphoreGive(camAIMutex);
         return false;
     }
 
@@ -906,7 +908,7 @@ static void recognitionTask(void *pvParameters) {
                 snprintf(time_buf, sizeof(time_buf), "%02d:%02d:%02d", t.tm_hour, t.tm_min, t.tm_sec);
                 tft.setTextColor(TFT_CYAN, TFT_BLACK);
                 tft.setCursor(245, 220); // Đặt ở dưới cùng
-                tft.setTextSize(2);
+                tft.setTextSize(1);
                 tft.print(time_buf);
             }
 
@@ -925,8 +927,8 @@ static void recognitionTask(void *pvParameters) {
                 // --- KẾT THÚC ---
                 Serial.println("[REC] give camAIMutex (no face)");
                 xSemaphoreGive(camAIMutex);
-                //vTaskDelay(40 / portTICK_PERIOD_MS);
-                vTaskDelay(10 / portTICK_PERIOD_MS);
+                
+                vTaskDelay(40 / portTICK_PERIOD_MS);
                 continue;
             }
 
@@ -953,8 +955,8 @@ static void recognitionTask(void *pvParameters) {
                 // --- KẾT THÚC ---
                 Serial.println("[REC] give camAIMutex (face too small)");
                 xSemaphoreGive(camAIMutex);
-                // vTaskDelay(40 / portTICK_PERIOD_MS);
-                vTaskDelay(10 / portTICK_PERIOD_MS);
+                vTaskDelay(40 / portTICK_PERIOD_MS);
+                
                 continue;
             }
 
@@ -988,8 +990,8 @@ static void recognitionTask(void *pvParameters) {
                 // --- KẾT THÚC ---
                 Serial.println("[REC] give camAIMutex (stabilizing)");
                 xSemaphoreGive(camAIMutex);
-                // vTaskDelay(40 / portTICK_PERIOD_MS);
-                vTaskDelay(10 / portTICK_PERIOD_MS);
+                vTaskDelay(40 / portTICK_PERIOD_MS);
+               
                 continue;
             }
 
@@ -1045,7 +1047,7 @@ static void recognitionTask(void *pvParameters) {
         }
 
         // Now handle recognition result outside the camera mutex (handlers will take it if needed)
-        if (localName.length() > 0 && localSim > 0.1f) {
+        if (localName.length() > 0 && localSim > 0.1f && localName != "unknown") {
             tft.setTextColor(TFT_GREEN, TFT_BLACK);
             tft.setCursor(245, 10);
             tft.setTextSize(2);
@@ -1182,7 +1184,28 @@ void sendAttendanceProof(String employeeId){
 void loop() {
     // main Arduino loop is now idle; recognition and camera work are handled
     // by the `recognitionTask` FreeRTOS task which has a larger stack.
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    Serial.println("--- HEAP VA STACK HIGH WATER MARKS ---");
+
+    // 1. In thông tin HEAP (RAM nội bộ) và PSRAM
+    Serial.printf("HEAP: Con trong %u / Tong %u\n", ESP.getFreeHeap(), ESP.getHeapSize());
+    Serial.printf("PSRAM: Con trong %u / Tong %u\n", ESP.getFreePsram(), ESP.getPsramSize());
+
+    // 2. In HWM của từng tác vụ (số byte còn trống)
+    if (g_recogTaskHandle)
+        Serial.printf(" - RecogTask HWM (Core 1): %u bytes\n", uxTaskGetStackHighWaterMark(g_recogTaskHandle));
+    if (g_enrollTaskHandle)
+        Serial.printf(" - EnrollTask HWM (Core 1): %u bytes\n", uxTaskGetStackHighWaterMark(g_enrollTaskHandle));
+    if (g_senderTaskHandle)
+        Serial.printf(" - SenderTask HWM (Core 0): %u bytes\n", uxTaskGetStackHighWaterMark(g_senderTaskHandle));
+    if (g_wsTaskHandle)
+        Serial.printf(" - WsTask HWM (Core 0): %u bytes\n", uxTaskGetStackHighWaterMark(g_wsTaskHandle));
+    
+    // Tác vụ loop này cũng có HWM!
+    Serial.printf(" - LoopTask HWM (Core %d): %u bytes\n", xPortGetCoreID(), uxTaskGetStackHighWaterMark(NULL)); // NULL = tác vụ hiện tại
+
+    Serial.println("---------------------------------------");
+
+    vTaskDelay(5000 / portTICK_PERIOD_MS); // Ngủ 5 giây
 }
 
 // Xóa toàn bộ dữ liệu khuôn mặt đã enroll để tất cả trở thành "unknown"
@@ -1521,13 +1544,6 @@ void recognize() {
         return;
     }
 
-    Serial.print("Recognized face as ");
-    Serial.print(recognition.match.name.c_str());
-    Serial.print(" with confidence ");
-    Serial.print(recognition.match.similarity);
-    Serial.print(" (");
-    Serial.print(recognition.benchmark.millis());
-    Serial.printf("ms) | HEAP: %u | PSRAM: %u\n", ESP.getFreeHeap(), ESP.getFreePsram());
 
     
   }

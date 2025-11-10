@@ -114,7 +114,7 @@ function App() {
 
         {/* Route cho Employee (Yêu cầu role="employee") */}
         <Route 
-          path="/employee-dashboard" 
+          path="/employee" 
           element={<ProtectedRoute role="employee"><EmployeeLayout /></ProtectedRoute>}
         >
           <Route index element={<EmployeeDashboard />} /> {/* Trang mặc định /employee */}
@@ -131,7 +131,7 @@ const HomeRedirect = () => {
   const user = authService.getUser();
   if (!user) return <Navigate to="/login" replace />;
   if (user.role === 'manager') return <Navigate to="/manager" replace />;
-  if (user.role === 'employee') return <Navigate to="/employee-dashboard" replace />;
+  if (user.role === 'employee') return <Navigate to="/employee" replace />;
   return <Navigate to="/login" replace />;
 };
 

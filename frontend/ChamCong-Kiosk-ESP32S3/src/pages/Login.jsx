@@ -19,7 +19,7 @@ const Login = () => {
                 navigate('/manager');
             }
             else{
-                navigate('/employee-dashboard');
+                navigate('/employee');
             }
         }catch(error){
             setError('Đăng nhập thất bại. Vui lòng kiểm tra lại Email hoặc Mật khẩu.');
