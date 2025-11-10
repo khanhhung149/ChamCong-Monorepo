@@ -68,6 +68,7 @@ const ManagerDashboard = () => {
       if (token) {
         wsClient.send(`auth:admin:${token}`); // Gửi Token
       }
+      // wsClient.send('get_kiosk_status');
     };
 
     wsClient.onmessage = (event) => {
@@ -76,16 +77,20 @@ const ManagerDashboard = () => {
 
         // Lắng nghe log mới từ Kiosk (Gợi ý 1C)
         if (msg.type === 'new_log') {
-          console.log('Real-time log received:', msg.data);
-          // Thêm log mới vào đầu danh sách, và giữ 5 mục
-          setRecentLogs(prevLogs => [msg.data, ...prevLogs.slice(0, 4)]);
+          const kioskCount = msg.count; // Lấy số lượng Kiosk
+          console.log(`WS: Kiosk status update, count = ${kioskCount}`);
+          if (kioskCount > 0) {
+            setKioskStatus({ isOnline: true, statusText: 'Kiosk Online' });
+          } else {
+            setKioskStatus({ isOnline: false, statusText: 'Kiosk Offline' });
+          }
         }
       } catch (e) {
         // Lắng nghe tin nhắn text (auth, progress...)
         console.log('WS Text:', event.data);
-        if(event.data.includes('auth:success')) {
-            setKioskStatus({ isOnline: true, statusText: 'Đã kết nối Admin' });
-        }
+    //     if(event.data.includes('auth:success')) {
+    //         setKioskStatus({ isOnline: true, statusText: 'Đã kết nối Admin' });
+    //     }
       }
     };
 
